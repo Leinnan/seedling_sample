@@ -2,14 +2,15 @@ use crate::actions::{set_movement_actions, Actions};
 use crate::loading::AudioAssets;
 use crate::GameState;
 use bevy::prelude::*;
-use bevy_kira_audio::prelude::*;
+use bevy_seedling::pool::Sampler;
+use bevy_seedling::prelude::*;
 
 pub struct InternalAudioPlugin;
 
 // This plugin is responsible to control the game audio
 impl Plugin for InternalAudioPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(AudioPlugin)
+        app.add_plugins(SeedlingPlugin::default())
             .add_systems(OnEnter(GameState::Playing), start_audio)
             .add_systems(
                 Update,
@@ -20,37 +21,30 @@ impl Plugin for InternalAudioPlugin {
     }
 }
 
-#[derive(Resource)]
-struct FlyingAudio(Handle<AudioInstance>);
+#[derive(Component)]
+struct FlyingAudio;
 
-fn start_audio(mut commands: Commands, audio_assets: Res<AudioAssets>, audio: Res<Audio>) {
-    audio.pause();
-    let handle = audio
-        .play(audio_assets.flying.clone())
-        .looped()
-        .with_volume(0.3)
-        .handle();
-    commands.insert_resource(FlyingAudio(handle));
+fn start_audio(mut commands: Commands, audio_assets: Res<AudioAssets>) {
+    commands.spawn((
+        SamplePlayer::new(audio_assets.flying.clone())
+            .looping()
+            .with_volume(Volume::Linear(0.3)),
+        FlyingAudio,
+    ));
 }
 
 fn control_flying_sound(
     actions: Res<Actions>,
-    audio: Res<FlyingAudio>,
-    mut audio_instances: ResMut<Assets<AudioInstance>>,
+    mut audio_q: Query<(&mut PlaybackSettings, &Sampler), With<FlyingAudio>>,
 ) {
-    if let Some(instance) = audio_instances.get_mut(&audio.0) {
-        match instance.state() {
-            PlaybackState::Paused { .. } => {
-                if actions.player_movement.is_some() {
-                    instance.resume(AudioTween::default());
-                }
+    for (mut settings, status) in audio_q.iter_mut() {
+        if actions.player_movement.is_some() {
+            if !status.is_playing() {
+                settings.play();
             }
-            PlaybackState::Playing { .. } => {
-                if actions.player_movement.is_none() {
-                    instance.pause(AudioTween::default());
-                }
-            }
-            _ => {}
+        }
+        if actions.player_movement.is_none() && status.is_playing() {
+            settings.pause();
         }
     }
 }
